@@ -663,3 +663,164 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   Accessibility (WCAG 2.1 AA)
+   ============================================================ */
+
+/* Visually hidden but available to assistive tech (WCAG 1.3.1, 4.1.2). */
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link — lets keyboard/SR users bypass repeated content (WCAG 2.4.1). */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -40px;
+  background: var(--color-primary);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  font-weight: 600;
+  z-index: 1000;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 8px;
+  outline: 3px solid #fde68a;
+  outline-offset: 2px;
+}
+
+/* Strong, predictable focus indicator for every interactive control
+   (WCAG 2.4.7). Uses :focus-visible so mouse clicks don't leave
+   persistent rings on buttons but keyboard/AT navigation does. */
+:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+  outline: none; /* custom ring below is more visible than default */
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.45);
+}
+
+/* Highlighted violation spans — they are role="button" now. Make the
+   keyboard focus ring extra visible against the tinted background. */
+.highlight:focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px #fff;
+}
+
+/* Hint text under form fields — readable contrast (WCAG 1.4.3 requires
+   AA 4.5:1). #475569 on white = 7.5:1 ratio. */
+.field-hint {
+  color: #475569;
+  font-size: 13px;
+  margin: 6px 0 4px;
+  line-height: 1.45;
+}
+
+/* aria-pressed visual state — mirrors .mode-btn-active so toggle buttons
+   show which option is selected without relying on color alone. */
+[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.mode-btn[aria-pressed="true"] {
+  background: #eff6ff;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.auth-switch button[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--color-primary), #1e293b);
+}
+
+.auth-switch button[aria-pressed="false"] {
+  background: var(--color-secondary);
+}
+
+/* Summary <dl>/<dt>/<dd> layout (replaces the old div/span version). */
+.viewer-summary dt.stat-label,
+.viewer-summary dd.stat-value {
+  margin: 0;
+  display: block;
+}
+
+.viewer-summary .summary-stat {
+  align-items: center;
+}
+
+/* Big number on top, label below — visual order, not DOM order.
+   DOM order (label → value) reads naturally for screen readers. */
+.viewer-summary dd.stat-value { order: 1; }
+.viewer-summary dt.stat-label { order: 2; }
+
+/* Error region: already has role="alert" in JSX; reinforce with an
+   icon-prefix via ::before so visual users see it's an error without
+   relying on color alone (WCAG 1.4.1). */
+.error::before {
+  content: "⚠ ";
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+/* Link underline for in-body links — don't rely on color alone. */
+.fetched-link,
+.source-url {
+  text-decoration: underline;
+}
+
+/* Respect user's reduced-motion preference (WCAG 2.3.3). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  button:hover,
+  .btn-fetch:hover,
+  .copy-btn:hover {
+    transform: none;
+  }
+}
+
+/* High-contrast mode (Windows) — keep focus rings visible. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid CanvasText;
+  }
+  .highlight {
+    forced-color-adjust: none;
+    outline: 1px solid CanvasText;
+  }
+  .highlight-active {
+    outline: 3px solid Highlight;
+  }
+}

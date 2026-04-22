@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { AnalysisResponse, ParagraphFinding, ViolationDetail } from "../api/client";
 
 type Segment =
   | { kind: "text"; text: string }
   | { kind: "violation"; text: string; violationIndex: number; severity: string };
+
+const SEVERITY_LABEL_RU: Record<string, string> = {
+  green: "незначительное",
+  orange: "умеренное",
+  red: "серьёзное",
+};
 
 function splitByViolations(
   text: string,
@@ -70,13 +76,17 @@ export function TextAnalysisViewer({
   const [paragraphTexts, setParagraphTexts] = useState<Record<number, string>>({});
   const [appliedViolations, setAppliedViolations] = useState<Set<string>>(new Set());
   const [skippedViolations, setSkippedViolations] = useState<Set<string>>(new Set());
-  // User-edited replacement text per violation (keyed by "${unit}-${violation}")
   const [editedReplacements, setEditedReplacements] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
+  const [actionMessage, setActionMessage] = useState<string>("");
 
   const contentRef = useRef<HTMLDivElement>(null);
   const spanRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const popupRef = useRef<HTMLDivElement>(null);
+  const firstFocusableRef = useRef<HTMLElement | null>(null);
+  const popupLabelId = useId();
+  const popupDescId = useId();
 
   const itemByUnitIndex = new Map<number, ParagraphFinding>(
     analysisResult.items.map((item) => [item.unit_index, item])
@@ -90,20 +100,53 @@ export function TextAnalysisViewer({
     return editedReplacements[id] ?? fallback;
   }
 
+  function closePopup() {
+    const previouslySelected = selectedId;
+    setSelectedId(null);
+    if (previouslySelected) {
+      const trigger = spanRefs.current[previouslySelected];
+      if (trigger) trigger.focus();
+    }
+  }
+
   useEffect(() => {
     if (selectedId === null) return;
+
     function handleOutsideClick(e: MouseEvent) {
-      if (contentRef.current && !contentRef.current.contains(e.target as Node)) {
-        setSelectedId(null);
+      const popup = popupRef.current;
+      if (popup && popup.contains(e.target as Node)) return;
+      const trigger = spanRefs.current[selectedId!];
+      if (trigger && trigger.contains(e.target as Node)) return;
+      setSelectedId(null);
+    }
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePopup();
       }
     }
+
     document.addEventListener("click", handleOutsideClick);
-    return () => document.removeEventListener("click", handleOutsideClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("click", handleOutsideClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId === null) return;
+    const target = firstFocusableRef.current;
+    if (target) {
+      const timer = window.setTimeout(() => target.focus(), 0);
+      return () => window.clearTimeout(timer);
+    }
   }, [selectedId]);
 
   function openPopup(id: string, spanEl: HTMLSpanElement) {
     if (selectedId === id) {
-      setSelectedId(null);
+      closePopup();
       return;
     }
     spanRefs.current[id] = spanEl;
@@ -138,13 +181,17 @@ export function TextAnalysisViewer({
     }
 
     setAppliedViolations((prev) => new Set([...prev, id]));
-    setSelectedId(null);
+    setActionMessage(`Замена применена: «${prob}» заменено на «${replacement}».`);
+    closePopup();
   }
 
   function handleSkipViolation(unitIndex: number, violationIndex: number) {
     const id = `${unitIndex}-${violationIndex}`;
+    const item = itemByUnitIndex.get(unitIndex);
+    const prob = item?.violations[violationIndex]?.problematic_text ?? "";
     setSkippedViolations((prev) => new Set([...prev, id]));
-    setSelectedId(null);
+    setActionMessage(`Пропущено замечание для фрагмента «${prob}».`);
+    closePopup();
   }
 
   function handleEditReplacement(id: string, value: string) {
@@ -156,7 +203,23 @@ export function TextAnalysisViewer({
     for (const item of analysisResult.items) {
       text += getCurrentText(item) + "\n\n";
     }
-    navigator.clipboard.writeText(text.trim());
+    navigator.clipboard.writeText(text.trim()).then(
+      () => setActionMessage("Текст скопирован в буфер обмена."),
+      () => setActionMessage("Не удалось скопировать текст."),
+    );
+  }
+
+  function triggerAriaLabel(
+    violation: ViolationDetail,
+    text: string,
+    unitIndex: number,
+  ): string {
+    const severity = SEVERITY_LABEL_RU[violation.severity] ?? violation.severity;
+    return (
+      `Замечание ${severity}. ${violation.rule_name}. ` +
+      `Фрагмент: ${text}. Абзац ${unitIndex + 1}. ` +
+      `Нажмите Enter, чтобы открыть подробности и варианты замены.`
+    );
   }
 
   function renderParagraph(item: ParagraphFinding) {
@@ -168,9 +231,19 @@ export function TextAnalysisViewer({
       return (
         <span
           ref={(el) => { if (el) spanRefs.current[id] = el; }}
+          role="button"
+          tabIndex={0}
+          aria-haspopup="dialog"
+          aria-expanded={isSelected}
+          aria-label={`Абзац ${item.unit_index + 1}. Нарушений нет. Нажмите Enter для подробностей.`}
           className={`highlight highlight-green ${isSelected ? "highlight-active" : ""}`}
-          style={{ cursor: "pointer" }}
           onClick={(e) => { e.stopPropagation(); openPopup(id, e.currentTarget); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              openPopup(id, e.currentTarget);
+            }
+          }}
         >
           {currentText}
         </span>
@@ -185,8 +258,6 @@ export function TextAnalysisViewer({
       item.unit_index
     );
 
-    // If all violations have been applied or skipped, no highlights remain —
-    // render the paragraph as plain text.
     const hasAnyHighlight = segments.some((s) => s.kind === "violation");
     if (!hasAnyHighlight) {
       return <span>{currentText}</span>;
@@ -200,13 +271,24 @@ export function TextAnalysisViewer({
           }
           const id = `${item.unit_index}-${seg.violationIndex}`;
           const isSelected = selectedId === id;
+          const violation = item.violations[seg.violationIndex];
           return (
             <span
               key={si}
               ref={(el) => { if (el) spanRefs.current[id] = el; }}
+              role="button"
+              tabIndex={0}
+              aria-haspopup="dialog"
+              aria-expanded={isSelected}
+              aria-label={triggerAriaLabel(violation, seg.text, item.unit_index)}
               className={`highlight highlight-${seg.severity} ${isSelected ? "highlight-active" : ""}`}
-              style={{ cursor: "pointer" }}
               onClick={(e) => { e.stopPropagation(); openPopup(id, e.currentTarget); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openPopup(id, e.currentTarget);
+                }
+              }}
             >
               {seg.text}
             </span>
@@ -230,34 +312,65 @@ export function TextAnalysisViewer({
 
     return (
       <div
+        ref={popupRef}
         className="analysis-popup"
         style={{ top: `${popupPos.top}px`, left: `${popupPos.left}px` }}
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby={popupLabelId}
+        aria-describedby={popupDescId}
         onClick={(e) => e.stopPropagation()}
       >
         {isGreen || !violation ? (
           <>
-            <p className="popup-label">✓ Нарушений нет</p>
-            {item.overall_comment && <p className="popup-suggestion">{item.overall_comment}</p>}
+            <p className="popup-label" id={popupLabelId}>
+              <span aria-hidden="true">✓ </span>Нарушений нет
+            </p>
+            {item.overall_comment ? (
+              <p className="popup-suggestion" id={popupDescId}>{item.overall_comment}</p>
+            ) : (
+              <p id={popupDescId} className="sr-only">Для этого абзаца замечаний не найдено.</p>
+            )}
             <div className="popup-actions popup-actions-single">
-              <button className="btn-skip" onClick={() => setSelectedId(null)}>Закрыть</button>
+              <button
+                type="button"
+                className="btn-skip"
+                ref={(el) => { firstFocusableRef.current = el; }}
+                onClick={closePopup}
+              >
+                Закрыть
+              </button>
             </div>
           </>
         ) : (
           <>
-            <p className="popup-label">
-              <span className={`violation-badge violation-${violation.severity}`}>{violation.rule_id}</span>
+            <p className="popup-label" id={popupLabelId}>
+              <span className={`violation-badge violation-${violation.severity}`}>
+                {violation.rule_id}
+                <span className="sr-only"> — {SEVERITY_LABEL_RU[violation.severity] ?? violation.severity}</span>
+              </span>
               {" "}{violation.rule_name}
             </p>
-            {violation.comment && <p className="popup-suggestion">{violation.comment}</p>}
+            {violation.comment ? (
+              <p className="popup-suggestion" id={popupDescId}>{violation.comment}</p>
+            ) : (
+              <p id={popupDescId} className="sr-only">Пояснения нет.</p>
+            )}
             {violation.problematic_text && (
               <div className="popup-rewrite-block">
                 <div className="rewrite-row">
-                  <span className="rewrite-label">Было:</span>
-                  <span className="rewrite-from">«{violation.problematic_text}»</span>
+                  <span className="rewrite-label" id={`${popupLabelId}-was`}>Было</span>
+                  <span className="rewrite-from" aria-labelledby={`${popupLabelId}-was`}>
+                    «{violation.problematic_text}»
+                  </span>
                 </div>
                 <div className="rewrite-row rewrite-row-edit">
-                  <span className="rewrite-label">Стало:</span>
+                  <label className="rewrite-label" htmlFor={`${popupLabelId}-edit`}>
+                    Стало (можно отредактировать)
+                  </label>
                   <textarea
+                    id={`${popupLabelId}-edit`}
+                    ref={(el) => { firstFocusableRef.current = el; }}
                     className="rewrite-edit"
                     value={getReplacementValue(selectedId, violation.suggested_rewrite)}
                     onChange={(e) => handleEditReplacement(selectedId, e.target.value)}
@@ -269,17 +382,21 @@ export function TextAnalysisViewer({
             )}
             <div className="popup-actions">
               <button
+                type="button"
                 className="btn-skip"
                 onClick={() => handleSkipViolation(unitIndex, violationIndex)}
+                aria-label="Пропустить замечание и убрать выделение"
               >
-                ✕ Пропустить
+                <span aria-hidden="true">✕ </span>Пропустить
               </button>
               <button
+                type="button"
                 className="btn-accept"
                 onClick={() => handleAcceptViolation(unitIndex, violationIndex)}
                 disabled={!getReplacementValue(selectedId, violation.suggested_rewrite).trim()}
+                aria-label="Применить предложенную замену в тексте"
               >
-                ✓ Применить
+                <span aria-hidden="true">✓ </span>Применить
               </button>
             </div>
           </>
@@ -289,24 +406,37 @@ export function TextAnalysisViewer({
   }
 
   return (
-    <div className="analysis-viewer">
+    <section className="analysis-viewer panel" aria-labelledby="analysis-heading">
       <div className="viewer-header">
         <div className="viewer-title">
-          <h3>Результат анализа</h3>
+          <h2 id="analysis-heading">Результат анализа</h2>
           {sourceTitle && <p className="source-title">{sourceTitle}</p>}
           {sourceUrl && (
             <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="source-url">
               {sourceUrl}
+              <span className="sr-only"> (открывается в новой вкладке)</span>
             </a>
           )}
         </div>
-        <button className="copy-btn" onClick={handleCopy} title="Скопировать текст">
-          📋 Копировать
+        <button
+          type="button"
+          className="copy-btn"
+          onClick={handleCopy}
+          aria-label="Скопировать обработанный текст в буфер обмена"
+        >
+          <span aria-hidden="true">📋 </span>Копировать
         </button>
       </div>
 
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {actionMessage}
+      </div>
+
       <div className="viewer-content" ref={contentRef}>
-        <div className="analysis-text">
+        <p className="sr-only">
+          В тексте ниже выделены фрагменты с замечаниями. Переходите по ним клавишей Tab, открывайте подробности клавишей Enter. Закрыть окно замечания — Escape.
+        </p>
+        <div className="analysis-text" aria-label="Размеченный текст с замечаниями">
           {analysisResult.items.map((item, index) => (
             <span key={item.unit_index}>
               {renderParagraph(item)}
@@ -317,20 +447,20 @@ export function TextAnalysisViewer({
         {renderPopup()}
       </div>
 
-      <div className="viewer-summary">
+      <dl className="viewer-summary" aria-label="Сводка по результатам">
         <div className="summary-stat green-stat">
-          <span className="stat-value">{analysisResult.summary.green}</span>
-          <span className="stat-label">хорошо</span>
+          <dt className="stat-label">Хорошо</dt>
+          <dd className="stat-value">{analysisResult.summary.green}</dd>
         </div>
         <div className="summary-stat orange-stat">
-          <span className="stat-value">{analysisResult.summary.orange}</span>
-          <span className="stat-label">требует правок</span>
+          <dt className="stat-label">Требует правок</dt>
+          <dd className="stat-value">{analysisResult.summary.orange}</dd>
         </div>
         <div className="summary-stat red-stat">
-          <span className="stat-value">{analysisResult.summary.red}</span>
-          <span className="stat-label">переписать</span>
+          <dt className="stat-label">Переписать</dt>
+          <dd className="stat-value">{analysisResult.summary.red}</dd>
         </div>
-      </div>
-    </div>
+      </dl>
+    </section>
   );
 }
