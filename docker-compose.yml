@@ -9,6 +9,8 @@ services:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    networks:
+      - db_net
 
   backend:
     build:
@@ -21,17 +23,18 @@ services:
       DEBUG: "1"
     volumes:
       - ./backend/app:/app
-    ports:
-      - "8000:8000"
     depends_on:
       - db
+    networks:
+      - db_net
+      - app_net
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     environment:
-      VITE_API_BASE_URL: http://localhost:8000/api
+      VITE_API_BASE_URL: /api
     volumes:
       - ./frontend:/workspace
       - /workspace/node_modules
@@ -39,6 +42,14 @@ services:
       - "5173:5173"
     depends_on:
       - backend
+    networks:
+      - app_net
 
 volumes:
   pg_data:
+
+networks:
+  app_net:
+    driver: bridge
+  db_net:
+    driver: bridge
