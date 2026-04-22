@@ -9,13 +9,15 @@ function splitByViolations(
   text: string,
   violations: ViolationDetail[],
   appliedViolations: Set<string>,
+  skippedViolations: Set<string>,
   unitIndex: number
 ): Segment[] {
   type Pos = { start: number; end: number; violationIndex: number };
 
   const positions: Pos[] = [];
   for (let i = 0; i < violations.length; i++) {
-    if (appliedViolations.has(`${unitIndex}-${i}`)) continue;
+    const id = `${unitIndex}-${i}`;
+    if (appliedViolations.has(id) || skippedViolations.has(id)) continue;
     const prob = violations[i].problematic_text.trim();
     if (!prob) continue;
     const start = text.indexOf(prob);
@@ -25,7 +27,6 @@ function splitByViolations(
 
   positions.sort((a, b) => a.start - b.start);
 
-  // Remove overlapping (keep first found)
   const noOverlap: Pos[] = [];
   let lastEnd = 0;
   for (const pos of positions) {
@@ -66,10 +67,11 @@ export function TextAnalysisViewer({
   sourceTitle?: string | null;
   sourceUrl?: string | null;
 }) {
-  // Current text per paragraph (updated as violations are accepted)
   const [paragraphTexts, setParagraphTexts] = useState<Record<number, string>>({});
   const [appliedViolations, setAppliedViolations] = useState<Set<string>>(new Set());
-  // selectedId: "${unit_index}-${violation_index}" or "${unit_index}-green"
+  const [skippedViolations, setSkippedViolations] = useState<Set<string>>(new Set());
+  // User-edited replacement text per violation (keyed by "${unit}-${violation}")
+  const [editedReplacements, setEditedReplacements] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -82,6 +84,10 @@ export function TextAnalysisViewer({
 
   function getCurrentText(item: ParagraphFinding): string {
     return paragraphTexts[item.unit_index] ?? item.source_text;
+  }
+
+  function getReplacementValue(id: string, fallback: string): string {
+    return editedReplacements[id] ?? fallback;
   }
 
   useEffect(() => {
@@ -118,10 +124,11 @@ export function TextAnalysisViewer({
     const item = itemByUnitIndex.get(unitIndex);
     if (!item) return;
 
+    const id = `${unitIndex}-${violationIndex}`;
     const violation = item.violations[violationIndex];
     const currentText = getCurrentText(item);
     const prob = violation.problematic_text.trim();
-    const replacement = violation.suggested_rewrite.trim();
+    const replacement = getReplacementValue(id, violation.suggested_rewrite).trim();
 
     if (prob && replacement && currentText.includes(prob)) {
       setParagraphTexts((prev) => ({
@@ -130,8 +137,18 @@ export function TextAnalysisViewer({
       }));
     }
 
-    setAppliedViolations((prev) => new Set([...prev, `${unitIndex}-${violationIndex}`]));
+    setAppliedViolations((prev) => new Set([...prev, id]));
     setSelectedId(null);
+  }
+
+  function handleSkipViolation(unitIndex: number, violationIndex: number) {
+    const id = `${unitIndex}-${violationIndex}`;
+    setSkippedViolations((prev) => new Set([...prev, id]));
+    setSelectedId(null);
+  }
+
+  function handleEditReplacement(id: string, value: string) {
+    setEditedReplacements((prev) => ({ ...prev, [id]: value }));
   }
 
   function handleCopy() {
@@ -160,7 +177,20 @@ export function TextAnalysisViewer({
       );
     }
 
-    const segments = splitByViolations(currentText, item.violations, appliedViolations, item.unit_index);
+    const segments = splitByViolations(
+      currentText,
+      item.violations,
+      appliedViolations,
+      skippedViolations,
+      item.unit_index
+    );
+
+    // If all violations have been applied or skipped, no highlights remain —
+    // render the paragraph as plain text.
+    const hasAnyHighlight = segments.some((s) => s.kind === "violation");
+    if (!hasAnyHighlight) {
+      return <span>{currentText}</span>;
+    }
 
     return (
       <>
@@ -197,7 +227,6 @@ export function TextAnalysisViewer({
     const isGreen = parts[1] === "green";
     const violationIndex = isGreen ? -1 : parseInt(parts[1], 10);
     const violation: ViolationDetail | null = violationIndex >= 0 ? item.violations[violationIndex] : null;
-    const isApplied = violation ? appliedViolations.has(selectedId) : false;
 
     return (
       <div
@@ -220,23 +249,37 @@ export function TextAnalysisViewer({
               {" "}{violation.rule_name}
             </p>
             {violation.comment && <p className="popup-suggestion">{violation.comment}</p>}
-            {violation.problematic_text && violation.suggested_rewrite && (
-              <div className="popup-violation-item">
-                <div className="violation-rewrite">
+            {violation.problematic_text && (
+              <div className="popup-rewrite-block">
+                <div className="rewrite-row">
+                  <span className="rewrite-label">Было:</span>
                   <span className="rewrite-from">«{violation.problematic_text}»</span>
-                  {" → "}
-                  <span className="rewrite-to">«{violation.suggested_rewrite}»</span>
+                </div>
+                <div className="rewrite-row rewrite-row-edit">
+                  <span className="rewrite-label">Стало:</span>
+                  <textarea
+                    className="rewrite-edit"
+                    value={getReplacementValue(selectedId, violation.suggested_rewrite)}
+                    onChange={(e) => handleEditReplacement(selectedId, e.target.value)}
+                    rows={2}
+                    placeholder="Введите замену"
+                  />
                 </div>
               </div>
             )}
             <div className="popup-actions">
-              <button className="btn-skip" onClick={() => setSelectedId(null)}>✕ Пропустить</button>
+              <button
+                className="btn-skip"
+                onClick={() => handleSkipViolation(unitIndex, violationIndex)}
+              >
+                ✕ Пропустить
+              </button>
               <button
                 className="btn-accept"
                 onClick={() => handleAcceptViolation(unitIndex, violationIndex)}
-                disabled={isApplied}
+                disabled={!getReplacementValue(selectedId, violation.suggested_rewrite).trim()}
               >
-                {isApplied ? "✓ Принято" : "✓ Принять"}
+                ✓ Применить
               </button>
             </div>
           </>

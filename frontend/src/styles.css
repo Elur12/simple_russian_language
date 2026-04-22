@@ -476,6 +476,57 @@ button:disabled {
   font-weight: 600;
 }
 
+.popup-rewrite-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--color-surface-2, #f7f7f8);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.rewrite-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rewrite-row-edit {
+  margin-top: 2px;
+}
+
+.rewrite-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rewrite-edit {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #16a34a;
+  font-weight: 600;
+  background: #fff;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 4px;
+  resize: vertical;
+  min-height: 40px;
+  line-height: 1.35;
+}
+
+.rewrite-edit:focus {
+  outline: none;
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
+}
+
 .popup-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
