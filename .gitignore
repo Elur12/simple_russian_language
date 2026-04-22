@@ -1,0 +1,17 @@
+.github/
+.env
+PLAN.md
+TESTING.md
+node_modules/
+dist/
+build/
+*.log
+*.env
+.DS_Store
+.idea/
+.vscode/
+*.iml
+*.sublime-project
+*.sublime-workspace
+*.swp
+QUICK_START.md
